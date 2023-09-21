@@ -1398,28 +1398,36 @@ func resourceFlowUpdate(ctx context.Context, d *schema.ResourceData, meta interf
 func resourceFlowDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn := meta.(*conns.AWSClient).AppFlowConn(ctx)
 
-	if err := stopFlow(ctx, d, meta); err != nil {
-		return err
-	}
-
 	out, _ := FindFlowByARN(ctx, conn, d.Id())
 
-	log.Printf("[INFO] Deleting AppFlow Flow %s", d.Id())
+	// Check the flow state
+	switch *out.FlowStatus {
+	case "Active":
+		// Flow is active, stop it first
+		if err := stopFlow(ctx, d, meta); err != nil {
+			return err
+		}
+	case "Suspended":
+		// Flow is suspended, proceed to delete it
+		log.Printf("[INFO] Deleting AppFlow Flow %s", d.Id())
 
-	_, err := conn.DeleteFlowWithContext(ctx, &appflow.DeleteFlowInput{
-		FlowName: out.FlowName,
-	})
+		_, err := conn.DeleteFlowWithContext(ctx, &appflow.DeleteFlowInput{
+			FlowName: out.FlowName,
+		})
 
-	if tfawserr.ErrCodeEquals(err, appflow.ErrCodeResourceNotFoundException) {
-		return nil
-	}
+		if tfawserr.ErrCodeEquals(err, appflow.ErrCodeResourceNotFoundException) {
+			return nil
+		}
 
-	if err != nil {
-		return diag.Errorf("deleting AppFlow Flow (%s): %s", d.Id(), err)
-	}
+		if err != nil {
+			return diag.Errorf("deleting AppFlow Flow (%s): %s", d.Id(), err)
+		}
 
-	if err := FlowDeleted(ctx, conn, d.Id()); err != nil {
-		return diag.Errorf("waiting for AppFlow Flow (%s) to be deleted: %s", d.Id(), err)
+		if err := FlowDeleted(ctx, conn, d.Id()); err != nil {
+			return diag.Errorf("waiting for AppFlow Flow (%s) to be deleted: %s", d.Id(), err)
+		}
+	default:
+		return nil // Flow is in some other state, no action needed
 	}
 
 	return nil
