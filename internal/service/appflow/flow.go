@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/appflow"
 	"github.com/hashicorp/aws-sdk-go-base/v2/awsv1shim/v2/tfawserr"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/hashicorp/terraform-provider-aws/internal/conns"
@@ -26,6 +27,8 @@ import (
 const (
 	AttrObjectPath = "object_path"
 )
+
+var isFlowStarted bool
 
 // @SDKResource("aws_appflow_flow", name="Flow")
 // @Tags(identifierAttribute="id")
@@ -1218,6 +1221,53 @@ func ResourceFlow() *schema.Resource {
 	}
 }
 
+func startFlow(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	conn := meta.(*conns.AWSClient).AppFlowConn(ctx)
+
+	in := &appflow.StartFlowInput{
+		FlowName: aws.String(d.Get(names.AttrName).(string)),
+	}
+
+	log.Printf("[DEBUG] Starting AppFlow Flow (%s): %#v", d.Id(), in)
+	_, err := conn.StartFlowWithContext(ctx, in)
+
+	if err != nil {
+		return diag.Errorf("Starting Appflow Flow (%s): %s", d.Get(names.AttrName).(string), err)
+	}
+
+	return resourceFlowRead(ctx, d, meta)
+}
+
+func stopFlow(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	conn := meta.(*conns.AWSClient).AppFlowConn(ctx)
+
+	in := &appflow.StopFlowInput{
+		FlowName: aws.String(d.Get(names.AttrName).(string)),
+	}
+
+	log.Printf("[DEBUG] Stopping AppFlow Flow (%s): %#v", d.Id(), in)
+	_, err := conn.StopFlowWithContext(ctx, in)
+
+	if err != nil {
+		return diag.Errorf("Stopping Appflow Flow (%s): %s", d.Get(names.AttrName).(string), err)
+	}
+
+	// Wait for the flow to be stopped
+	log.Printf("[INFO] Waiting for AppFlow Flow %s to be stopped", d.Id())
+	stateConf := &retry.StateChangeConf{
+		Target:  []string{"Suspended"},
+		Refresh: FlowStatus(ctx, conn, d.Id()),
+		Timeout: FlowDeletionTimeout,
+	}
+
+	_, err = stateConf.WaitForStateContext(ctx)
+	if err != nil {
+		return diag.Errorf("waiting for AppFlow Flow (%s) to be stopped: %s", d.Id(), err)
+	}
+
+	return resourceFlowRead(ctx, d, meta)
+}
+
 func resourceFlowCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn := meta.(*conns.AWSClient).AppFlowConn(ctx)
 
@@ -1249,6 +1299,13 @@ func resourceFlowCreate(ctx context.Context, d *schema.ResourceData, meta interf
 	}
 
 	d.SetId(aws.StringValue(out.FlowArn))
+
+	if !isFlowStarted {
+		if err := startFlow(ctx, d, meta); err != nil {
+			return err
+		}
+		isFlowStarted = true
+	}
 
 	return resourceFlowRead(ctx, d, meta)
 }
@@ -1340,6 +1397,10 @@ func resourceFlowUpdate(ctx context.Context, d *schema.ResourceData, meta interf
 
 func resourceFlowDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn := meta.(*conns.AWSClient).AppFlowConn(ctx)
+
+	if err := stopFlow(ctx, d, meta); err != nil {
+		return err
+	}
 
 	out, _ := FindFlowByARN(ctx, conn, d.Id())
 
