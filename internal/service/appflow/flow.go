@@ -1213,6 +1213,11 @@ func ResourceFlow() *schema.Resource {
 					},
 				},
 			},
+			"flow_status": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The status of the AppFlow Flow (Active, Suspended, etc.).",
+			},
 			names.AttrTags:    tftags.TagsSchema(),
 			names.AttrTagsAll: tftags.TagsSchemaComputed(),
 		},
@@ -1364,6 +1369,8 @@ func resourceFlowRead(ctx context.Context, d *schema.ResourceData, meta interfac
 	} else {
 		d.Set("trigger_config", nil)
 	}
+
+	d.Set("flow_status", *out.FlowStatus)
 
 	return nil
 }
