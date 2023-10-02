@@ -1210,6 +1210,11 @@ func ResourceFlow() *schema.Resource {
 					},
 				},
 			},
+			"flow_status": {
+				Type:         schema.TypeString,
+				Required:     true,
+				ValidateFunc: validation.StringInSlice(appflow.FlowStatus_Values(), false),
+			},
 			names.AttrTags:    tftags.TagsSchema(),
 			names.AttrTagsAll: tftags.TagsSchemaComputed(),
 		},
