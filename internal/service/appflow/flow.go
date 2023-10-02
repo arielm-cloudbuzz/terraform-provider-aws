@@ -1279,6 +1279,12 @@ func resourceFlowCreate(ctx context.Context, d *schema.ResourceData, meta interf
 
 	d.SetId(aws.StringValue(out.FlowArn))
 
+	if d.Get("flow_status").(string) == "Active" {
+		if diags := resourceFlowStart(ctx, d, conn); diags.HasError() {
+			return diags
+		}
+	}
+
 	return resourceFlowRead(ctx, d, meta)
 }
 
@@ -1354,6 +1360,17 @@ func resourceFlowUpdate(ctx context.Context, d *schema.ResourceData, meta interf
 
 		if d.HasChange(names.AttrDescription) {
 			in.Description = aws.String(d.Get(names.AttrDescription).(string))
+		}
+
+		// if d.HasChange("flow_status") && d.Get("flow_status").(string) == "Active" {
+		// 	if err := resourceFlowStart(ctx, d, meta); err != nil {
+		// 		return diag.Errorf("starting AppFlow Flow (%s): %s", d.Id(), err.Error())
+		// 	}
+		// }
+		if d.HasChange("flow_status") && d.Get("flow_status").(string) == "Active" {
+			if err := resourceFlowStart(ctx, d, conn); err != nil {
+				return err
+			}
 		}
 
 		log.Printf("[DEBUG] Updating AppFlow Flow (%s): %#v", d.Id(), in)
