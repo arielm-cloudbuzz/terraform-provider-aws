@@ -1223,6 +1223,30 @@ func ResourceFlow() *schema.Resource {
 	}
 }
 
+func resourceFlowStart(ctx context.Context, d *schema.ResourceData, conn *appflow.Appflow) diag.Diagnostics {
+	flowName := d.Get("flow_name").(string)
+
+	in := &appflow.StartFlowInput{
+		FlowName: aws.String(flowName),
+	}
+
+	log.Printf("[INFO] Starting AppFlow Flow %s", flowName)
+
+	out, err := conn.StartFlowWithContext(ctx, in)
+
+	if err != nil {
+		return diag.Errorf("Error starting AppFlow Flow (%s): %s", flowName, err)
+	}
+
+	if out == nil || out.FlowStatus == nil {
+		return diag.Errorf("Starting Appflow Flow (%s): empty output", flowName)
+	}
+
+	d.SetId(aws.StringValue(out.FlowStatus))
+
+	return resourceFlowRead(ctx, d, conn)
+}
+
 func resourceFlowCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn := meta.(*conns.AWSClient).AppFlowConn(ctx)
 
