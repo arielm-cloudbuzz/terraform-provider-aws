@@ -26,7 +26,6 @@ import (
 
 const (
 	AttrObjectPath        = "object_path"
-	FlowReadTimeout       = 2 * time.Minute // Adjust this value as needed
 	FlowSuspensionTimeout = 2 * time.Minute // Adjust this value as needed
 )
 
@@ -1226,8 +1225,10 @@ func ResourceFlow() *schema.Resource {
 	}
 }
 
-func resourceFlowStart(ctx context.Context, d *schema.ResourceData, conn *appflow.Appflow) diag.Diagnostics {
-	flowName := d.Get("flow_name").(string)
+func resourceFlowStart(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	conn := meta.(*conns.AWSClient).AppFlowConn(ctx)
+
+	flowName := d.Get(names.AttrName).(string)
 
 	in := &appflow.StartFlowInput{
 		FlowName: aws.String(flowName),
@@ -1235,7 +1236,11 @@ func resourceFlowStart(ctx context.Context, d *schema.ResourceData, conn *appflo
 
 	log.Printf("[INFO] Starting AppFlow Flow %s", flowName)
 
+	log.Printf("[DEBUG] Entering resourceFlowStart for flow %s", flowName)
+
 	out, err := conn.StartFlowWithContext(ctx, in)
+
+	log.Printf("[DEBUG] Exiting resourceFlowStart for flow %s", flowName)
 
 	if err != nil {
 		return diag.Errorf("Error starting AppFlow Flow (%s): %s", flowName, err)
@@ -1245,9 +1250,45 @@ func resourceFlowStart(ctx context.Context, d *schema.ResourceData, conn *appflo
 		return diag.Errorf("Starting Appflow Flow (%s): empty output", flowName)
 	}
 
-	d.SetId(aws.StringValue(out.FlowStatus))
+	// Check if the flow is active, but don't modify the Terraform state
+	if aws.StringValue(out.FlowStatus) != "Active" {
+		return diag.Errorf("Expected AppFlow Flow (%s) to be Active, got: %s", flowName, aws.StringValue(out.FlowStatus))
+	}
 
-	return resourceFlowRead(ctx, d, conn)
+	return resourceFlowRead(ctx, d, meta)
+}
+
+func resourceFlowStop(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	conn := meta.(*conns.AWSClient).AppFlowConn(ctx)
+
+	flowName := d.Get(names.AttrName).(string)
+
+	in := &appflow.StopFlowInput{
+		FlowName: aws.String(flowName),
+	}
+
+	log.Printf("[INFO] Stopping AppFlow Flow %s", flowName)
+
+	log.Printf("[DEBUG] Entering resourceFlowStop for flow %s", flowName)
+
+	out, err := conn.StopFlowWithContext(ctx, in)
+
+	log.Printf("[DEBUG] Exiting resourceFlowStop for flow %s", flowName)
+
+	if err != nil {
+		return diag.Errorf("Error stopping AppFlow Flow (%s): %s", flowName, err)
+	}
+
+	if out == nil || out.FlowStatus == nil {
+		return diag.Errorf("Stopping Appflow Flow (%s): empty output", flowName)
+	}
+
+	// Check if the flow is active, but don't modify the Terraform state
+	if aws.StringValue(out.FlowStatus) != "Suspended" {
+		return diag.Errorf("Expected AppFlow Flow (%s) to be Suspended, got: %s", flowName, aws.StringValue(out.FlowStatus))
+	}
+
+	return resourceFlowRead(ctx, d, meta)
 }
 
 func resourceFlowCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
@@ -1283,7 +1324,7 @@ func resourceFlowCreate(ctx context.Context, d *schema.ResourceData, meta interf
 	d.SetId(aws.StringValue(out.FlowArn))
 
 	if d.Get("flow_status").(string) == "Active" {
-		if diags := resourceFlowStart(ctx, d, conn); diags.HasError() {
+		if diags := resourceFlowStart(ctx, d, meta); diags.HasError() {
 			return diags
 		}
 	}
@@ -1293,27 +1334,6 @@ func resourceFlowCreate(ctx context.Context, d *schema.ResourceData, meta interf
 
 func resourceFlowRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn := meta.(*conns.AWSClient).AppFlowConn(ctx)
-
-	stateConf := &retry.StateChangeConf{
-		Target:  []string{"DONE"},
-		Refresh: FlowStatus(ctx, conn, d.Id()),
-		Timeout: FlowReadTimeout,
-	}
-
-	result, waitErr := stateConf.WaitForStateContext(ctx)
-	if waitErr != nil {
-		return diag.FromErr(waitErr)
-	}
-
-	flow, ok := result.(*appflow.FlowDefinition)
-	if !ok {
-		return diag.Errorf("unexpected type for result: %T", result)
-	}
-
-	err := d.Set("flow_status", aws.StringValue(flow.FlowStatus))
-	if err != nil {
-		return diag.FromErr(err)
-	}
 
 	out, err := FindFlowByARN(ctx, conn, d.Id())
 
@@ -1337,37 +1357,23 @@ func resourceFlowRead(ctx context.Context, d *schema.ResourceData, meta interfac
 		return diag.Errorf("reading AppFlow Flow (%s): %s", d.Id(), err)
 	}
 
-	err = d.Set(names.AttrName, out.FlowName)
-	if err != nil {
-		return nil
-	}
-	err = d.Set(names.AttrARN, out2.FlowArn)
-	if err != nil {
-		return nil
-	}
-	err = d.Set(names.AttrDescription, out2.Description)
-	if err != nil {
-		return nil
-	}
+	d.Set(names.AttrName, out.FlowName)
+	d.Set(names.AttrARN, out2.FlowArn)
+	d.Set(names.AttrDescription, out2.Description)
+	d.Set("flow_status", out2.FlowStatus)
 
 	if err := d.Set("destination_flow_config", flattenDestinationFlowConfigs(out2.DestinationFlowConfigList)); err != nil {
 		return diag.Errorf("setting destination_flow_config: %s", err)
 	}
 
-	err = d.Set("kms_arn", out2.KmsArn)
-	if err != nil {
-		return nil
-	}
+	d.Set("kms_arn", out2.KmsArn)
 
 	if out2.SourceFlowConfig != nil {
 		if err := d.Set("source_flow_config", []interface{}{flattenSourceFlowConfig(out2.SourceFlowConfig)}); err != nil {
 			return diag.Errorf("setting source_flow_config: %s", err)
 		}
 	} else {
-		err := d.Set("source_flow_config", nil)
-		if err != nil {
-			return nil
-		}
+		d.Set("source_flow_config", nil)
 	}
 
 	if err := d.Set("task", flattenTasks(out2.Tasks)); err != nil {
@@ -1379,10 +1385,7 @@ func resourceFlowRead(ctx context.Context, d *schema.ResourceData, meta interfac
 			return diag.Errorf("setting trigger_config: %s", err)
 		}
 	} else {
-		err := d.Set("trigger_config", nil)
-		if err != nil {
-			return nil
-		}
+		d.Set("trigger_config", nil)
 	}
 
 	return nil
@@ -1390,26 +1393,6 @@ func resourceFlowRead(ctx context.Context, d *schema.ResourceData, meta interfac
 
 func resourceFlowUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	conn := meta.(*conns.AWSClient).AppFlowConn(ctx)
-
-	if d.HasChange("flow_status") {
-		flowStatusFunc := FlowStatus(ctx, conn, d.Id())
-		realStatus, _, err := flowStatusFunc()
-		if err != nil {
-			return diag.FromErr(err)
-		}
-
-		desiredStatus := d.Get("flow_status").(string)
-		actualStatus := realStatus.(*appflow.FlowDefinition).FlowStatus
-
-		if actualStatus != nil && desiredStatus != *actualStatus {
-			// Handle the drift, e.g., by calling resourceFlowStart or other necessary actions.
-			if desiredStatus == "Active" {
-				if err := resourceFlowStart(ctx, d, conn); err != nil {
-					return diag.Errorf("setting flow_status: %s", err)
-				}
-			}
-		}
-	}
 
 	if d.HasChangesExcept("tags", "tags_all") {
 		in := &appflow.UpdateFlowInput{
@@ -1424,14 +1407,28 @@ func resourceFlowUpdate(ctx context.Context, d *schema.ResourceData, meta interf
 			in.Description = aws.String(d.Get(names.AttrDescription).(string))
 		}
 
-		// if d.HasChange("flow_status") && d.Get("flow_status").(string) == "Active" {
-		// 	if err := resourceFlowStart(ctx, d, meta); err != nil {
-		// 		return diag.Errorf("starting AppFlow Flow (%s): %s", d.Id(), err.Error())
-		// 	}
-		// }
-		if d.HasChange("flow_status") && d.Get("flow_status").(string) == "Active" {
-			if err := resourceFlowStart(ctx, d, conn); err != nil {
-				return err
+		if d.HasChange("flow_status") {
+			flowStatusFunc := FlowStatus(ctx, conn, d.Id())
+			realStatus, _, err := flowStatusFunc()
+			if err != nil {
+				return diag.FromErr(err)
+			}
+
+			desiredStatus := d.Get("flow_status").(string)
+			actualStatus := realStatus.(*appflow.FlowDefinition).FlowStatus
+
+			if actualStatus != nil && desiredStatus != *actualStatus {
+				// Handle the drift, e.g., by calling resourceFlowStart or other necessary actions.
+				if desiredStatus == "Active" {
+					if err := resourceFlowStart(ctx, d, meta); err != nil {
+						return diag.Errorf("setting flow_status: %s", err)
+					}
+				}
+				if desiredStatus == "Suspended" {
+					if err := resourceFlowStop(ctx, d, meta); err != nil {
+						return diag.Errorf("setting flow_status: %s", err)
+					}
+				}
 			}
 		}
 
@@ -1456,6 +1453,13 @@ func resourceFlowDelete(ctx context.Context, d *schema.ResourceData, meta interf
 
 	log.Printf("[INFO] Deleting AppFlow Flow %s", d.Id())
 
+	flowStatus := d.Get("flow_status").(string)
+	if flowStatus != "Suspended" {
+		if err := resourceFlowStop(ctx, d, meta); err != nil {
+			return diag.Errorf("setting flow_status: %s", err)
+		}
+	}
+
 	// Ensure the flow is suspended before deletion
 	stateConf := &retry.StateChangeConf{
 		Pending: []string{"Active"},             // Assuming "Active" is the only state that should transition to "Suspended"
@@ -1468,10 +1472,6 @@ func resourceFlowDelete(ctx context.Context, d *schema.ResourceData, meta interf
 	if waitErr != nil {
 		return diag.Errorf("waiting for AppFlow Flow (%s) to be suspended: %s", d.Id(), waitErr)
 	}
-
-	//out, _ = FindFlowByARN(ctx, conn, d.Id())
-
-	//log.Printf("[INFO] Deleting AppFlow Flow %s", d.Id())
 
 	_, err = conn.DeleteFlowWithContext(ctx, &appflow.DeleteFlowInput{
 		FlowName: out.FlowName,
@@ -2451,6 +2451,13 @@ func expandTask(tfMap map[string]interface{}) *appflow.Task {
 
 	if v, ok := tfMap["task_type"].(string); ok && v != "" {
 		a.TaskType = aws.String(v)
+		if v == "Map_all" {
+			a.SourceFields = aws.StringSlice([]string{})
+		} else {
+			if v, ok := tfMap["source_fields"].([]interface{}); ok && len(v) > 0 {
+				a.SourceFields = flex.ExpandStringList(v)
+			}
+		}
 	}
 
 	return a
