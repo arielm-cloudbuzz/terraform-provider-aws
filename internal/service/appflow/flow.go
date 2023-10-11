@@ -1357,23 +1357,41 @@ func resourceFlowRead(ctx context.Context, d *schema.ResourceData, meta interfac
 		return diag.Errorf("reading AppFlow Flow (%s): %s", d.Id(), err)
 	}
 
-	d.Set(names.AttrName, out.FlowName)
-	d.Set(names.AttrARN, out2.FlowArn)
-	d.Set(names.AttrDescription, out2.Description)
-	d.Set("flow_status", out2.FlowStatus)
+	err = d.Set(names.AttrName, out.FlowName)
+	if err != nil {
+		return nil
+	}
+	err = d.Set(names.AttrARN, out2.FlowArn)
+	if err != nil {
+		return nil
+	}
+	err = d.Set(names.AttrDescription, out2.Description)
+	if err != nil {
+		return nil
+	}
+	err = d.Set("flow_status", out2.FlowStatus)
+	if err != nil {
+		return nil
+	}
 
 	if err := d.Set("destination_flow_config", flattenDestinationFlowConfigs(out2.DestinationFlowConfigList)); err != nil {
 		return diag.Errorf("setting destination_flow_config: %s", err)
 	}
 
-	d.Set("kms_arn", out2.KmsArn)
+	err = d.Set("kms_arn", out2.KmsArn)
+	if err != nil {
+		return nil
+	}
 
 	if out2.SourceFlowConfig != nil {
 		if err := d.Set("source_flow_config", []interface{}{flattenSourceFlowConfig(out2.SourceFlowConfig)}); err != nil {
 			return diag.Errorf("setting source_flow_config: %s", err)
 		}
 	} else {
-		d.Set("source_flow_config", nil)
+		err := d.Set("source_flow_config", nil)
+		if err != nil {
+			return nil
+		}
 	}
 
 	if err := d.Set("task", flattenTasks(out2.Tasks)); err != nil {
@@ -1385,7 +1403,10 @@ func resourceFlowRead(ctx context.Context, d *schema.ResourceData, meta interfac
 			return diag.Errorf("setting trigger_config: %s", err)
 		}
 	} else {
-		d.Set("trigger_config", nil)
+		err := d.Set("trigger_config", nil)
+		if err != nil {
+			return nil
+		}
 	}
 
 	return nil
