@@ -142,6 +142,9 @@ This resource supports the following arguments:
 * `kms_arn` - (Optional) ARN (Amazon Resource Name) of the Key Management Service (KMS) key you provide for encryption. This is required if you do not want to use the Amazon AppFlow-managed KMS key. If you don't provide anything here, Amazon AppFlow uses the Amazon AppFlow-managed KMS key.
 * `tags` - (Optional) Key-value mapping of resource tags. If configured with a provider [`default_tags` configuration block](https://registry.terraform.io/providers/hashicorp/aws/latest/docs#default_tags-configuration-block) present, tags with matching keys will overwrite those defined at the provider-level.
 * `tags_all` - Map of tags assigned to the resource, including those inherited from the provider [`default_tags` configuration block](https://registry.terraform.io/providers/hashicorp/aws/latest/docs#default_tags-configuration-block).
+* `flow_status` - (Optional) Specifies the operational state of the flow. Valid values:
+   - `Active`: The flow operates based on its configuration. Scheduled flows run as per schedule, while event-triggered flows run upon detecting specified events. On-demand flows run only when manually triggered.
+   - `Suspended`: Deactivates an active flow. Scheduled and event-triggered flows cease to run until reactivated, with no effect on on-demand flows.
 
 ### Destination Flow Config
 
@@ -322,6 +325,11 @@ Amplitude, Datadog, Dynatrace, Google Analytics, Infor Nexus, Marketo, ServiceNo
 ##### SAPOData Source Properties
 
 * `object_path` - (Required) Object path specified in the SAPOData flow source.
+* `max_page_size` - (Optional) The maximum number of records that Amazon AppFlow receives in each page of
+the response from your SAP application. For transfers of OData records, the
+maximum page size is 3,000. For transfers of data that comes from an ODP
+provider, the maximum page size is 10,000.
+Defaults to 1,000.
 
 ##### Veeva Source Properties
 
