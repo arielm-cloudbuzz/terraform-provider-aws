@@ -27,6 +27,7 @@ import (
 const (
 	AttrObjectPath        = "object_path"
 	FlowSuspensionTimeout = 2 * time.Minute // Adjust this value as needed
+	AttrMaxPageSize       = "max_page_size"
 )
 
 // ResourceFlow @SDKResource("aws_appflow_flow", name="Flow")
@@ -911,6 +912,12 @@ func ResourceFlow() *schema.Resource {
 													Type:         schema.TypeString,
 													Required:     true,
 													ValidateFunc: validation.All(validation.StringMatch(regexache.MustCompile(`\S+`), "must not contain any whitespace characters"), validation.StringLenBetween(1, 512)),
+												},
+												AttrMaxPageSize: {
+													Type:         schema.TypeInt,
+													Optional:     true,
+													Default:      1000,
+													ValidateFunc: validation.IntBetween(1, 10000),
 												},
 											},
 										},
@@ -2316,6 +2323,13 @@ func expandSAPODataSourceProperties(tfMap map[string]interface{}) *appflow.SAPOD
 
 	if v, ok := tfMap[AttrObjectPath].(string); ok && v != "" {
 		a.ObjectPath = aws.String(v)
+	}
+
+	// Extract max_page_size value directly from the map
+	if v, ok := tfMap[AttrMaxPageSize].(int); ok {
+		a.PaginationConfig = &appflow.SAPODataPaginationConfig{
+			MaxPageSize: aws.Int64(int64(v)),
+		}
 	}
 
 	return a
