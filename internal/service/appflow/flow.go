@@ -27,7 +27,7 @@ import (
 const (
 	AttrObjectPath        = "object_path"
 	FlowSuspensionTimeout = 2 * time.Minute // Adjust this value as needed
-	AttrMaxPageSize       = "max_page_size"
+	AttrPaginationConfig  = "pagination_config"
 )
 
 // ResourceFlow @SDKResource("aws_appflow_flow", name="Flow")
@@ -321,11 +321,20 @@ func ResourceFlow() *schema.Resource {
 													Required:     true,
 													ValidateFunc: validation.All(validation.StringMatch(regexache.MustCompile(`\S+`), "must not contain any whitespace characters"), validation.StringLenBetween(1, 512)),
 												},
-												AttrMaxPageSize: {
-													Type:         schema.TypeInt,
-													Optional:     true,
-													Default:      1000,
-													ValidateFunc: validation.IntBetween(1, 10000),
+												AttrPaginationConfig: {
+													Type:     schema.TypeList,
+													Optional: true,
+													MaxItems: 1,
+													Elem: &schema.Resource{
+														Schema: map[string]*schema.Schema{
+															"max_page_size": {
+																Type:         schema.TypeInt,
+																Optional:     true,
+																Default:      1000,
+																ValidateFunc: validation.IntBetween(1, 10000),
+															},
+														},
+													},
 												},
 											},
 										},
@@ -1621,6 +1630,21 @@ func expandSalesforceSourceProperties(tfMap map[string]interface{}) *appflow.Sal
 	return a
 }
 
+// New function to expand pagination_config
+func expandSAPODataPaginationConfig(tfMap map[string]interface{}) *appflow.SAPODataPaginationConfig {
+	if tfMap == nil || len(tfMap) == 0 {
+		return nil
+	}
+
+	pc := &appflow.SAPODataPaginationConfig{}
+
+	if v, ok := tfMap["max_page_size"].(int); ok && v > 0 {
+		pc.MaxPageSize = aws.Int64(int64(v))
+	}
+
+	return pc
+}
+
 func expandSAPODataSourceProperties(tfMap map[string]interface{}) *appflow.SAPODataSourceProperties {
 	if tfMap == nil {
 		return nil
@@ -1632,11 +1656,10 @@ func expandSAPODataSourceProperties(tfMap map[string]interface{}) *appflow.SAPOD
 		a.ObjectPath = aws.String(v)
 	}
 
-	// Extract max_page_size value directly from the map
-	if v, ok := tfMap[AttrMaxPageSize].(int); ok {
-		a.PaginationConfig = &appflow.SAPODataPaginationConfig{
-			MaxPageSize: aws.Int64(int64(v)),
-		}
+	// Extract pagination_config and call the new expand function
+	if v, ok := tfMap[AttrPaginationConfig].([]interface{}); ok && len(v) > 0 {
+		pcMap := v[0].(map[string]interface{})
+		a.PaginationConfig = expandSAPODataPaginationConfig(pcMap)
 	}
 
 	return a
